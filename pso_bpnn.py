@@ -1,11 +1,12 @@
 import numpy as np
 import pandas as pd
 import pyswarms as ps
+import tensorflow as tf
 import matplotlib.pyplot as plt
 
-# ======================================
-# 1. DATA PREPARATION
-# ======================================
+global best_weights
+
+# Getting data
 
 def prepare_data(file_path):
 
@@ -19,7 +20,7 @@ def prepare_data(file_path):
         rssi = df["RSSI_dBm"].values
         print("Using RAW RSSI for training")
 
-    # Fixed normalization range
+    # Fixed normalization range : Normalize [-100, 0] to [0, 1]
     X = (rssi - (-100.0)) / (0.0 - (-100.0))
     X = np.clip(X, 0, 1).reshape(-1, 1)
 
@@ -28,9 +29,7 @@ def prepare_data(file_path):
     return X, y
 
 
-# ======================================
-# 2. NEURAL NETWORK (1-5-1)
-# ======================================
+# Making predictions based on the particle
 
 def forward_propagation(params, X):
 
@@ -38,7 +37,7 @@ def forward_propagation(params, X):
     b1 = params[5:10].reshape((5,))
     W2 = params[10:15].reshape((5, 1))
     b2 = params[15:16].reshape((1,))
-
+ 
     # Hidden layer (sigmoid)
     z1 = np.dot(X, W1) + b1
 
@@ -47,15 +46,14 @@ def forward_propagation(params, X):
 
     a1 = 1 / (1 + np.exp(-z1))
 
-    # Output layer (linear)
     y_pred = np.dot(a1, W2) + b2
+
+    print("Prediced", y_pred)
 
     return y_pred
 
 
-# ======================================
-# 3. FITNESS FUNCTION
-# ======================================
+# 3. Fitness function to score particles
 
 def fitness_function(particles, X, y):
 
@@ -70,9 +68,8 @@ def fitness_function(particles, X, y):
     return np.array(mse_list)
 
 
-# ======================================
-# 4. TRAINING EXECUTION
-# ======================================
+
+# 4. Training execution
 
 def train_model(X, y):
 
@@ -99,28 +96,52 @@ def train_model(X, y):
 
     return cost, best_pos
 
-
-# ======================================
-# RUN TRAINING
-# ======================================
-
 try:
 
     X_train, y_train = prepare_data('rssi_filtered_training_data.csv')
 
     best_cost, best_weights = train_model(X_train, y_train)
 
-    print("\n" + "="*30)
-    print("TRAINING COMPLETE")
-    print(f"Minimum MSE: {best_cost:.4f}")
-    print("="*30)
+    # print("\n" + "="*30)
+    # print("Training complete")
+    # print(f"Minimum MSE: {best_cost:.4f}")
+    # print("="*30)
 
-    print("\nCopy these values into your C++ header:\n")
+    # print(f"float W1[1][5] = {{{', '.join(map(str, best_weights[0:5]))}}};")
+    # print(f"float b1[5]    = {{{', '.join(map(str, best_weights[5:10]))}}};")
+    # print(f"float W2[5][1] = {{{', '.join(map(str, best_weights[10:15]))}}};")
+    # print(f"float b2[1]    = {{{best_weights[15]}}};")
 
-    print(f"float W1[1][5] = {{{', '.join(map(str, best_weights[0:5]))}}};")
-    print(f"float b1[5]    = {{{', '.join(map(str, best_weights[5:10]))}}};")
-    print(f"float W2[5][1] = {{{', '.join(map(str, best_weights[10:15]))}}};")
-    print(f"float b2[1]    = {{{best_weights[15]}}};")
+
+    print(best_weights)
+
+    # defining the architecture 
+
+    model = tf.keras.Sequential([
+        tf.keras.layers.Dense(5, activation='tanh', input_shape=(1,), name='hidden'),
+        tf.keras.layers.Dense(1, activation='linear', name='output')
+    ])
+
+    # extracting the intial parameters from the best particle
+
+    w1 = best_weights[0:5].reshape((1, 5))
+    b1 = best_weights[5:10]
+    w2 = best_weights[10:15].reshape((5, 1))
+    b2 = best_weights[15:16]
+
+    model.layers[0].set_weights([w1, b1]) # Setting hidden Layer
+    model.layers[1].set_weights([w2, b2]) # Setting output Layer
+
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=0.01), loss='mse')
+
+    print("Starting Backpropagation")
+    model.fit(X_train, y_train, epochs=200, verbose=0) # Fewer epochs needed now
+
+
+    # final weights and biases
+    final_w1, final_b1 = model.layers[0].get_weights()
+    final_w2, final_b2 = model.layers[1].get_weights()
+
 
 except FileNotFoundError:
-    print("Error: 'rssi_filtered_data.csv' not found.")
+    print("Error: file was not found.")
